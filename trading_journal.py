@@ -1,81 +1,123 @@
-import json
-from datetime import datetime
+import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
 
-# Trading Journal Class
-class TradingJournal:
-    def __init__(self, filename="journal.json"):
-        self.filename = filename
-        try:
-            with open(self.filename, "r") as f:
-                self.journal = json.load(f)
-        except FileNotFoundError:
-            self.journal = []
+st.set_page_config(page_title="JIGAR'S Trading Journal", layout="wide")
 
-    def add_trade(self, date, symbol, direction, qty, price, pnl, notes=""):
-        trade = {
-            "date": date,
-            "symbol": symbol.upper(),
-            "direction": direction,
-            "qty": qty,
-            "price": price,
-            "pnl": pnl,
-            "notes": notes
-        }
-        self.journal.append(trade)
-        self._save()
-        print("✅ Trade added successfully!")
+# --- Initialize Session State ---
+if "trades" not in st.session_state:
+    st.session_state["trades"] = []
 
-    def view_trades(self):
-        if not self.journal:
-            print("⚠️ No trades yet!")
-            return
-        for i, trade in enumerate(self.journal, 1):
-            print(f"{i}. {trade['date']} | {trade['symbol']} | {trade['direction']} | "
-                  f"Qty: {trade['qty']} | Price: {trade['price']} | "
-                  f"PnL: {trade['pnl']} | Notes: {trade['notes']}")
+# --- Sidebar Navigation ---
+menu = ["Add Trade", "View Trades", "Charts", "Summary"]
+choice = st.sidebar.radio("📌 Navigate", menu)
 
-    def win_rate(self):
-        wins = sum(1 for t in self.journal if t["pnl"] > 0)
-        losses = sum(1 for t in self.journal if t["pnl"] <= 0)
-        total = wins + losses
-        return (wins / total * 100) if total > 0 else 0
+# --- Add Trade Page ---
+if choice == "Add Trade":
+    st.title("➕ Add New Trade")
 
-    def _save(self):
-        with open(self.filename, "w") as f:
-            json.dump(self.journal, f, indent=4)
+    with st.form("trade_form"):
+        date = st.date_input("📅 Date")
+        symbol = st.text_input("📈 Symbol (e.g. NIFTY, BANKNIFTY)")
+        market_type = st.selectbox("🌍 Market Type", ["Equity", "Options", "Futures", "Forex", "Crypto"])
+        entry_price = st.number_input("💵 Entry Price", min_value=0.0, format="%.2f")
+        exit_price = st.number_input("💵 Exit Price", min_value=0.0, format="%.2f")
+        quantity = st.number_input("🔢 Quantity", min_value=1, step=1)
+        strategy = st.selectbox("🎯 Strategy", ["Breakout", "Reversal", "Scalping", "Swing", "Other"])
+        stop_loss = st.number_input("🛑 Stop Loss", min_value=0.0, format="%.2f")
+        outcome_summary = st.text_area("📝 Outcome Summary")
 
+        submitted = st.form_submit_button("Save Trade")
 
-# ------------------ RUNNING THE APP ------------------
-if __name__ == "__main__":
-    app = TradingJournal()
+        if submitted:
+            pnl = (exit_price - entry_price) * quantity
+            pnl_pct = ((exit_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
 
-    while True:
-        print("\n📒 Trading Journal Menu")
-        print("1. Add Trade")
-        print("2. View Trades")
-        print("3. Check Win Rate")
-        print("4. Exit")
-        choice = input("👉 Enter choice: ")
+            trade = {
+                "Date": date,
+                "Symbol": symbol,
+                "Market Type": market_type,
+                "Entry": entry_price,
+                "Exit": exit_price,
+                "Qty": quantity,
+                "PnL": pnl,
+                "PnL %": pnl_pct,
+                "Strategy": strategy,
+                "Stop Loss": stop_loss,
+                "Outcome": outcome_summary
+            }
 
-        if choice == "1":
-            date = input("Enter Date (YYYY-MM-DD): ") or str(datetime.today().date())
-            symbol = input("Enter Symbol: ")
-            direction = input("Direction (BUY/SELL): ")
-            qty = int(input("Quantity: "))
-            price = float(input("Price: "))
-            pnl = float(input("Profit/Loss: "))
-            notes = input("Notes (optional): ")
-            app.add_trade(date, symbol, direction, qty, price, pnl, notes)
+            st.session_state["trades"].append(trade)
+            st.success("✅ Trade saved successfully!")
 
-        elif choice == "2":
-            app.view_trades()
+# --- View Trades Page ---
+elif choice == "View Trades":
+    st.title("📑 All Trades")
 
-        elif choice == "3":
-            print(f"📊 Win Rate: {app.win_rate():.2f}%")
+    if st.session_state["trades"]:
+        df = pd.DataFrame(st.session_state["trades"])
 
-        elif choice == "4":
-            print("👋 Exiting... Bye!")
-            break
+        # Filters
+        st.subheader("🔍 Filter Trades")
+        strategy_filter = st.multiselect("Filter by Strategy", df["Strategy"].unique())
+        market_filter = st.multiselect("Filter by Market Type", df["Market Type"].unique())
 
-        else:
-            print("⚠️ Invalid choice! Try again.")
+        filtered_df = df.copy()
+        if strategy_filter:
+            filtered_df = filtered_df[filtered_df["Strategy"].isin(strategy_filter)]
+        if market_filter:
+            filtered_df = filtered_df[filtered_df["Market Type"].isin(market_filter)]
+
+        st.dataframe(filtered_df, use_container_width=True)
+
+        # Export
+        st.download_button("⬇ Download CSV", filtered_df.to_csv(index=False), "trading_journal.csv", "text/csv")
+    else:
+        st.info("No trades recorded yet.")
+
+# --- Charts Page ---
+elif choice == "Charts":
+    st.title("📊 Trading Charts")
+
+    if st.session_state["trades"]:
+        df = pd.DataFrame(st.session_state["trades"])
+
+        # Daily PnL
+        st.subheader("📅 Daily PnL")
+        daily_pnl = df.groupby("Date")["PnL"].sum()
+        fig, ax = plt.subplots()
+        daily_pnl.plot(kind="bar", ax=ax)
+        st.pyplot(fig)
+
+        # Strategy-wise Distribution
+        st.subheader("🎯 Strategy-wise PnL")
+        strategy_pnl = df.groupby("Strategy")["PnL"].sum()
+        fig2, ax2 = plt.subplots()
+        strategy_pnl.plot(kind="pie", autopct="%1.1f%%", ax=ax2)
+        st.pyplot(fig2)
+    else:
+        st.info("No data available for charts.")
+
+# --- Summary Page ---
+elif choice == "Summary":
+    st.title("📈 Performance Summary")
+
+    if st.session_state["trades"]:
+        df = pd.DataFrame(st.session_state["trades"])
+
+        total_trades = len(df)
+        total_profit = df["PnL"].sum()
+        win_rate = (df[df["PnL"] > 0].shape[0] / total_trades) * 100
+        avg_rr = (df["PnL"].mean() / abs(df["Stop Loss"].mean())) if df["Stop Loss"].mean() > 0 else 0
+        profit_factor = df[df["PnL"] > 0]["PnL"].sum() / abs(df[df["PnL"] < 0]["PnL"].sum()) if df[df["PnL"] < 0].shape[0] > 0 else float("inf")
+
+        st.metric("📊 Total Trades", total_trades)
+        st.metric("💰 Total Profit", f"{total_profit:.2f}")
+        st.metric("✅ Win Rate", f"{win_rate:.2f}%")
+        st.metric("⚖️ Avg. Reward/Risk", f"{avg_rr:.2f}")
+        st.metric("📈 Profit Factor", f"{profit_factor:.2f}")
+    else:
+        st.info("No trades recorded yet.")
+
+        
+            
